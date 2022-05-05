@@ -2,7 +2,9 @@ nextflow.enable.dsl = 2
 /*
 Run:
 
-nextflow run main.nf --genomes input.csv --requestedCPU 100 --requestedMem 100 --max_memory 10 --max_cpu 2
+# nextflow run main.nf --genomes input.csv --requestedCPU 100 --requestedMem 100 --max_memory 10 --max_cpu 2
+
+nextflow run main.nf --genomes input.csv --max_memory 10.GB --max_cpu 2
 */
 
 
@@ -113,6 +115,31 @@ process cluster {
 }
 
 
+process prokka {
+    /*
+    Only annotation
+    
+    sed '/^##FASTA/Q' prokka.gff > nosequence.gff
+    */
+    publishDir "${params.results}/annotation", mode: 'copy', overwrite: true
+    container 'nanozoo/prokka:1.14.6--c99ff65'
+    // container 'staphb/prokka:latest'
+    cpus 1
+
+    input:
+        tuple(val(name), path(genome))
+
+    output:
+        tuple(val(name), path("annotation/${name}.gff"))
+
+    """
+    gunzip -c ${genome} > tmp
+    prokka --mincontiglen 2000 --addgenes --locustag ${name} --cpus ${task.cpus} --prefix ${name} --outdir annotation tmp
+    rm tmp
+    """
+}
+
+
 workflow {
     // resources()
 
@@ -120,7 +147,13 @@ workflow {
                      .splitCsv(header: false)
                      .map{ row -> [row[0], row[1]] }
                      // .view()
-    coding(genomes)
-    frames = coding.out.map{ it -> it[1] }.collect()
-    cluster(frames)
+    // coding(genomes)
+    // frames = coding.out.map{ it -> it[1] }.collect()
+    // cluster(frames)
+
+    prokka(genomes)
 }
+
+
+// TODO: search for restricted HMM set through proteins
+
