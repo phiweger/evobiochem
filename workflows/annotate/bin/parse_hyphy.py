@@ -15,6 +15,8 @@ import pdb
 
 import screed
 
+from foldvis.io import load_conserved
+
 
 parser = argparse.ArgumentParser(description='Remove short contigs')
 parser.add_argument(
@@ -107,6 +109,10 @@ BUSTED
 
 # FUBAR .. 3, 4
 # MEME .. 6
+
+
+# First sequence is reference
+results['conserved'] = load_conserved(args.msa)
 
 
 with open(args.out, 'w+') as out:

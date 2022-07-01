@@ -23,6 +23,8 @@ parser = argparse.ArgumentParser(description='Remove short contigs')
 parser.add_argument(
     '--model', required=True, help='Path to AlphaFold v2 results')
 parser.add_argument(
+    '--surface', required=False, help='Interaction surface prediction (dMASIF)')
+parser.add_argument(
     '--pfam', required=True, help='Path to folder with Pfam database')
 parser.add_argument(
     '--out', default='domains.csv', help='Results')

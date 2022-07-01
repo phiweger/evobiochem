@@ -19,7 +19,7 @@ parser = argparse.ArgumentParser(description='Remove short contigs')
 parser.add_argument(
     '--genome', required=True, help='Genome')
 parser.add_argument(
-    '--name', required=True, help='Checksum of file')
+    '--name', required=True, help='Name of file as specified by user')
 args = parser.parse_args()
 
 
@@ -38,7 +38,7 @@ with screed.open(args.genome) as file:
 
         seq = str(record.sequence)
         hsh = hashlib.md5(seq.encode('utf-8')).hexdigest()
-        assert hsh not in d, 'Duplicate contig detected'
+        assert hsh not in d, 'Duplicate contig detected, exit.'
         d[hsh] = seq
         e[hsh] = str(record.name)
 

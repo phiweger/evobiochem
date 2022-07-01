@@ -31,19 +31,3 @@ process coding {
         """
 }
 
-
-process rename {
-    cache 'lenient'  // TODO: not sure why this is needed, file sys changes?
-
-    input:
-        tuple(val(name), path(genome))
-
-    output:
-        tuple(val(name), path("${name}.fna"), path("${name}.json"))
-
-    script:
-    """
-    rename.py --name ${name} --genome ${genome}
-    """
-
-}

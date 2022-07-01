@@ -1,7 +1,8 @@
 nextflow.enable.dsl = 2
 
 include { coding; coding as coding_ref } from './processes/annotation.nf'
-include { rename; rename as rename_ref } from './processes/annotation.nf'
+include { rename; rename as rename_ref } from './processes/utils.nf'
+include { checksum; checksum as checksum_ref } from './processes/utils.nf'
 
 /*
 Run:
@@ -172,27 +173,6 @@ process search {
     // --translation-table 11 --search-type 1
     // --search-type 3
     // --cov-mode 4 reduced the number of seqs in the test alignment (primates)
-}
-
-
-process checksum {
-    cache 'lenient'  // path and size-based
-    // cache 'deep'  // content-based but slow
-
-    input:
-        tuple(val(name), path(genome))
-
-    output:
-        tuple(val(name), env(checksum), path(genome))
-
-    shell:
-    '''
-    checksum=$(md5sum !{genome} | awk '{ printf $1 }')
-    '''
-    // awk print will insert newline, printf does not
-    // stackoverflow.com/questions/2021982
-    // alternative: ... | tr -d '\n'
-    // stackoverflow.com/questions/3134791
 }
 
 
@@ -549,18 +529,19 @@ process hyphy_busted {
 
 
 process parse_test {
-    publishDir "${params.results}/hyphy/${name}", mode: 'copy', overwrite: true
+    publishDir "${params.results}/annotation/", mode: 'copy', overwrite: true
     // echo true
-
+    container 'nanozoo/foldvis:94385e1--7df9d7f'
+    
     input:
         tuple(val(name), path(fubar), path(meme), path(busted), path(msa))
 
     output:
-        tuple(val(name), path("${name}.hyphy.parsed.json"))
+        tuple(val(name), path("${name}.results.json"))
 
     script:
     """
-    parse_hyphy.py --selection ${fubar} ${meme} ${busted} --msa ${msa} --out ${name}.hyphy.parsed.json
+    parse_hyphy.py --selection ${fubar} ${meme} ${busted} --msa ${msa} --out ${name}.results.json
     """
 }
 
@@ -598,25 +579,40 @@ process dereplicate {
 }
 
 
+/*
+path(pfam) is a list of all required Pfam files, including indices. We specify
+this so that nf links the files into the working directory of the process. We
+then assume ("--pfam .") that al files are in the top level directory.
+*/
 process annotate_structure {
-    container 'nanozoo/foldvis:d91a017--eb4c1ab'
+    container 'nanozoo/foldvis:94385e1--7df9d7f'
+    
     input:
-        tuple(path(fold), path(pfam))
-
-//   Pfam-A.hmm    aln.faa            result.txt
-// HmmPy.py                  Pfam-A.hmm.dat    aln.stk            test.tsv
-// InteracDome_v0.3-confident.tsv        Pfam-A.hmm.h3f    aln2.stk           test2.tsv
-// InteracDome_v0.3-representable.tsv    Pfam-A.hmm.h3i    anvio_parser.py        ynjC
-// InteracDome_v0.3-representableNR.tsv  Pfam-A.hmm.h3m    rcsb_pdb_1HSO.dom.tsv
-// NDM-1                     Pfam-A.hmm.h3p
-
+        tuple(path(fold), path(surface), path(pfam))
 
     output:
         path('domains.csv')
 
     script:
     """
-    annotate_structure.py --model ${fold} --pfam . --out domains.csv
+    annotate_structure.py --model ${fold} --surface ${surface} --pfam . --out domains.csv
+    """
+}
+
+
+process parse_aa_sequence {
+    container 'nanozoo/foldvis:94385e1--7df9d7f'
+
+    input:
+        path(structure)
+
+    output:
+        env(SEQ)
+
+    script:
+    """
+    SEQ=\$(parse_structure.py --model ${structure}) 
+    # -multi
     """
 }
 
@@ -642,12 +638,31 @@ workflow {
     // TODO; params file in json etc.
     // -params-file run_42.yaml 
 
+    // TODO: Add path to alphafold; we can then have a script do
+    // all filtering/ window averaging/ ... across all generated results
+    // (selection, conservation, ...); really, DMASIF should be there, too;
+    // Counterargument: Leave wf as is, publish, then sell 3D stuff separate
+    
+    if ( params.test ) {
+
+        genomes = channel.fromPath("${workflow.projectDir}/data/primates/*.fna")
+                         .map { x -> [x.baseName, x] }
+
+    } else {
+
+        genomes = channel.fromPath(params.genomes)
+                         .splitCsv(header: false, sep: '\t')
+                         .map{ row -> [row[0], row[1]] }
+                         // .view()
+    }
+
+
     if ( params.test ) {
 
         ref = channel.fromPath("${workflow.projectDir}/data/human.fna")
                      .map{ x -> ['ref', x] }
 
-        fold = channel.fromPath("${workflow.projectDir}/data/alphafold2/test_08df6_unrelaxed_rank_1_model_3.pdb")
+        fold = channel.fromPath("${workflow.projectDir}/data/alphafold2/transferrin/test_08df6_unrelaxed_rank_1_model_3.pdb")
         
         surface = channel.fromPath("${workflow.projectDir}/data/dmasif/transferrin_binding.pdb")
 
@@ -671,33 +686,17 @@ workflow {
     */
     
     if ( params.test ) {
-        annotate_structure(fold.combine(pfam))
+        annotate_structure(fold.combine(surface).combine(pfam))
+
+        parse_aa_sequence(fold).view()
+
     }
 
-
-    // TODO: Add path to alphafold; we can then have a script do
-    // all filtering/ window averaging/ ... across all generated results
-    // (selection, conservation, ...); really, DMASIF should be there, too;
-    // Counterargument: Leave wf as is, publish, then sell 3D stuff separate
     
-    if ( params.test ) {
-
-        genomes = channel.fromPath("${workflow.projectDir}/data/primates/*.fna")
-                         .map { x -> [x.baseName, x] }
-
-    } else {
-
-        genomes = channel.fromPath(params.genomes)
-                         .splitCsv(header: false, sep:'\t')
-                         .map{ row -> [row[0], row[1]] }
-                         // .view()
-    }
-    // spec = channel.fromPath(params.genomes)
-
-    // rename(checksum(genomes))
-
-    rename(genomes)
+    cs = checksum(genomes).map { name, hsh, fp -> [hsh, fp] }
+    rename(cs)
     
+
     // Dereplicate genomes?
     if ( params.dereplicate ) {
         
@@ -707,10 +706,12 @@ workflow {
     
     } else {
         
+        // rn = checksum.out.map { name, hsh, fp -> [hsh, fp] }
         rn = rename.out.map { name, fp, log -> [name, fp] }
-    
+
     }
     
+    rn.view()
     coding(rn)
     
 
@@ -722,6 +723,8 @@ workflow {
     rn_ref = rename_ref(ref).map { name, fp, log -> [name, fp] }
     annotate(rn_ref)
 
+    // Probably we need to call coding on the original bc/ we have the
+    // structures based on these ORFs
     coding_ref(rn_ref)
 
     search(
@@ -765,6 +768,11 @@ workflow {
     h3 = hyphy_busted(tree.out)
     parse_test(h1.join(h2).join(h3).join(msa.out))
     
+
+    // TODO: Get the first sequence of the MSA, degap, hash and pick corresp.
+    // structure from some folder; unmatching just dump
+
+
 
 
 
